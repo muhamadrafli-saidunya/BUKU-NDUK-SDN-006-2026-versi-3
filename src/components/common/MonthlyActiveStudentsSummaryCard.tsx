@@ -22,7 +22,10 @@ import {
   TrendingUp,
   School,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Search,
+  X,
+  ArrowRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { Student, SchoolProfile, Gender, AdminUser } from '../../types';
@@ -124,6 +127,10 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
 
   // Sub-tab under detail-bulan: 'tingkat' | 'rombel' | 'siswa-masuk' | 'siswa-mutasi' | 'siswa-meninggal'
   const [activeSubSection, setActiveSubSection] = useState<'tingkat' | 'rombel' | 'siswa-masuk' | 'siswa-mutasi' | 'siswa-meninggal'>('tingkat');
+
+  // Modal untuk melihat nama siswa yang masuk pada rombel tertentu
+  const [selectedRombelForModal, setSelectedRombelForModal] = useState<string | null>(null);
+  const [modalSearchQuery, setModalSearchQuery] = useState<string>('');
 
   // Generate 12 months for the Indonesian Academic Year (Juli startYear to Juni endYear)
   const startYear = getAcademicYearStart(activeTP);
@@ -493,6 +500,32 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
     }
     return rombelStats;
   }, [rombelStats, hideEmptyRombel]);
+
+  // Data siswa untuk modal rombel terpilih
+  const selectedRombelStat = useMemo(() => {
+    if (!selectedRombelForModal) return null;
+    return rombelStats.find(r => r.rombel === selectedRombelForModal) || null;
+  }, [selectedRombelForModal, rombelStats]);
+
+  const selectedRombelStudents = useMemo(() => {
+    if (!selectedRombelForModal) return [];
+    const inMonth = currentMonthData.akhirList.filter(s => s.kelasSekarang === selectedRombelForModal);
+    if (inMonth.length === 0 && canonicalActiveStudents.length > 0) {
+      return canonicalActiveStudents.filter(s => s.kelasSekarang === selectedRombelForModal);
+    }
+    return inMonth;
+  }, [selectedRombelForModal, currentMonthData.akhirList, canonicalActiveStudents]);
+
+  const filteredModalStudents = useMemo(() => {
+    if (!modalSearchQuery.trim()) return selectedRombelStudents;
+    const q = modalSearchQuery.toLowerCase().trim();
+    return selectedRombelStudents.filter(s => 
+      (s.namaLengkap && s.namaLengkap.toLowerCase().includes(q)) ||
+      (s.noInduk && s.noInduk.toLowerCase().includes(q)) ||
+      (s.nisn && s.nisn.toLowerCase().includes(q)) ||
+      (s.nik && s.nik.toLowerCase().includes(q))
+    );
+  }, [selectedRombelStudents, modalSearchQuery]);
 
   // Jumlah rombel aktif yang memiliki siswa (> 0)
   const activeRombelsCount = useMemo(() => {
@@ -1180,16 +1213,18 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
                               </td>
                               <td className="py-2.5 px-3 text-center font-mono text-slate-500">{r.persentase}%</td>
                               <td className="py-2.5 px-3 text-center">
-                                {onSelectRombelFilter && (
-                                  <button
-                                    type="button"
-                                    onClick={() => onSelectRombelFilter(r.rombel)}
-                                    className="px-2 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded text-[11px] font-bold cursor-pointer transition-colors"
-                                    title="Filter ke rombel ini"
-                                  >
-                                    Pilih
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedRombelForModal(r.rombel);
+                                    setModalSearchQuery('');
+                                  }}
+                                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#003399] hover:bg-blue-700 active:bg-blue-800 text-white font-bold rounded-lg text-xs shadow-xs hover:shadow-md transition-all active:scale-95 cursor-pointer group"
+                                  title={`Lihat nama siswa yang masuk pada ${r.rombel}`}
+                                >
+                                  <Users className="w-3.5 h-3.5 text-amber-300 group-hover:scale-110 transition-transform" />
+                                  <span>Pilih</span>
+                                </button>
                               </td>
                             </tr>
                           ))
@@ -1626,6 +1661,193 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Modal Daftar Nama Siswa yang Masuk pada Rombel Terpilih */}
+      {selectedRombelForModal && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+          onClick={() => setSelectedRombelForModal(null)}
+        >
+          <div 
+            className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header Modal */}
+            <div className="p-5 border-b border-slate-200 dark:border-slate-800 bg-gradient-to-r from-[#003399] via-blue-900 to-indigo-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center border border-white/20">
+                  <Users className="w-5 h-5 text-amber-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-black text-white">
+                      Daftar Siswa {selectedRombelForModal}
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-400 text-slate-950">
+                      Tingkat {getTingkatKelasNumber(selectedRombelForModal)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-blue-200 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span>Periode: <strong>{selectedMonthInfo.fullName}</strong></span>
+                    <span>•</span>
+                    <span>TP {activeTP} ({activeSemester})</span>
+                    {selectedRombelStat?.waliKelas && (
+                      <>
+                        <span>•</span>
+                        <span>Wali Kelas: <strong>{selectedRombelStat.waliKelas}</strong></span>
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedRombelForModal(null)}
+                className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
+                title="Tutup Modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Summary Badges & Quick Search */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Total:</span>
+                <span className="px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 text-xs font-black">
+                  {selectedRombelStudents.length} Siswa
+                </span>
+                <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs font-bold">
+                  {selectedRombelStudents.filter(s => s.jenisKelamin === 'L').length} Laki-laki
+                </span>
+                <span className="px-2.5 py-1 rounded-lg bg-pink-50 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 text-xs font-bold">
+                  {selectedRombelStudents.filter(s => s.jenisKelamin === 'P').length} Perempuan
+                </span>
+              </div>
+
+              {/* Search inside modal */}
+              <div className="relative min-w-[220px]">
+                <input
+                  type="text"
+                  placeholder="Cari nama / NIS / NISN..."
+                  value={modalSearchQuery}
+                  onChange={(e) => setModalSearchQuery(e.target.value)}
+                  className="w-full text-xs pl-8 pr-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                />
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              </div>
+            </div>
+
+            {/* Table Content */}
+            <div className="p-4 overflow-y-auto max-h-[55vh]">
+              {filteredModalStudents.length === 0 ? (
+                <div className="py-12 text-center text-slate-500 dark:text-slate-400 space-y-2">
+                  <Users className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600" />
+                  <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                    {modalSearchQuery.trim()
+                      ? `Tidak ditemukan siswa yang cocok dengan pencarian "${modalSearchQuery}".`
+                      : `Tidak ada siswa terdaftar pada ${selectedRombelForModal} untuk periode ${selectedMonthInfo.fullName}.`}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+                        <th className="py-2.5 px-3 font-bold w-10 text-center">No</th>
+                        <th className="py-2.5 px-3 font-bold">Nama Lengkap Siswa</th>
+                        <th className="py-2.5 px-3 font-bold text-center">NIS</th>
+                        <th className="py-2.5 px-3 font-bold text-center">NISN</th>
+                        <th className="py-2.5 px-3 font-bold text-center">L/P</th>
+                        <th className="py-2.5 px-3 font-bold">Tempat, Tanggal Lahir</th>
+                        <th className="py-2.5 px-3 font-bold text-center">Status</th>
+                        {onSelectDetail && (
+                          <th className="py-2.5 px-3 font-bold text-center w-24">Aksi</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                      {filteredModalStudents.map((st, i) => (
+                        <tr key={st.id} className="hover:bg-blue-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                          <td className="py-2.5 px-3 text-center text-slate-400 font-mono">{i + 1}</td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-slate-100">
+                            {st.namaLengkap}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono text-slate-600 dark:text-slate-300">
+                            {st.noInduk || '-'}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono text-slate-600 dark:text-slate-300">
+                            {st.nisn || '-'}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className={cn(
+                              "px-2 py-0.5 rounded text-[10px] font-bold",
+                              st.jenisKelamin === 'L'
+                                ? "bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                                : "bg-pink-50 dark:bg-pink-950 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-800"
+                            )}>
+                              {st.jenisKelamin === 'L' ? 'L' : 'P'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300">
+                            {st.tempatLahir ? `${st.tempatLahir}, ` : ''}{st.tanggalLahir ? formatIndonesianDate(st.tanggalLahir) : '-'}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                              {st.status || 'Aktif'}
+                            </span>
+                          </td>
+                          {onSelectDetail && (
+                            <td className="py-2.5 px-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedRombelForModal(null);
+                                  onSelectDetail(st.id);
+                                }}
+                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded-md text-xs font-bold transition-colors cursor-pointer inline-flex items-center gap-1"
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>Detail</span>
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Modal */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setSelectedRombelForModal(null)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                Tutup
+              </button>
+
+              {onSelectRombelFilter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const r = selectedRombelForModal;
+                    setSelectedRombelForModal(null);
+                    onSelectRombelFilter(r);
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-[#003399] hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  <span>Buka di Halaman Data Siswa Aktif</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
