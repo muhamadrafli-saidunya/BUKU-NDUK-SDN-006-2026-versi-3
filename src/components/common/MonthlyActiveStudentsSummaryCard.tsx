@@ -48,18 +48,10 @@ export interface MonthlyRombelStat {
   rombel: string;
   tingkat: number;
   waliKelas?: string;
-  awalTotal: number;
-  masukTotal: number;
-  mutasiTotal: number;
-  meninggalTotal: number;
   jmlL: number;
   jmlP: number;
   total: number;
   persentase: number;
-  students: Student[];
-  masukStudents: Student[];
-  mutasiStudents: Student[];
-  meninggalStudents: Student[];
 }
 
 export interface MonthlyTingkatStat {
@@ -314,55 +306,27 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
   // Monthly stats for each of the 12 academic months (Full periodic calculation: Masuk, Mutasi Keluar, & Meninggal)
   const periodicMonthlyStats = useMemo(() => {
     const startOfJulyKey = `${startYear}-07`;
+    const today = new Date();
+    const currentYearMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
 
-    const defaultTeacherNames: Record<string, string> = {
-      'Kelas 1': 'Dewi Anggraini, S.Pd.SD',
-      'Kelas 2': 'Suryani, S.Pd.',
-      'Kelas 3': 'Hendri Gunawan, S.Pd.I.',
-      'Kelas 4': 'Ratna Juwita, S.Pd.',
-      'Kelas 5': 'Bambang Irawan, S.Pd.',
-      'Kelas 6': 'Siti Rahmawati, S.Pd.',
-    };
-
-    const normalizeRombel = (cls?: string): string => {
-      if (!cls) return 'Kelas 1';
-      const trimmed = cls.trim();
-      if (/^[1-6]$/.test(trimmed)) return `Kelas ${trimmed}`;
-      const match = trimmed.match(/(?:kelas|tingkat|rombel)?\s*([1-6])/i);
-      if (match) return `Kelas ${match[1]}`;
-      return trimmed;
-    };
-
-    const getStudentRombel = (s: Student): string => {
-      if (s.kelasSekarang) return normalizeRombel(s.kelasSekarang);
-      if (s.diterimaDiKelas) return normalizeRombel(s.diterimaDiKelas);
-      if (s.mutasi?.dariKelas) return normalizeRombel(s.mutasi.dariKelas);
-      return 'Kelas 1';
-    };
-
-    // Keadaan awal sebelum 1 Juli: Siswa yang sudah terdaftar aktif sebelum Juli
-    // dan belum mutasi keluar / meninggal sebelum Juli
-    const runningActiveMap = new Map<string, typeof eligibleStudentsForTP[0]>();
-    eligibleStudentsForTP.forEach(s => {
+    // Prior to Month 0 (Juli startYear), students already admitted and neither mutated nor deceased before July:
+    let runningActiveList = eligibleStudentsForTP.filter(s => {
       const admKey = getStudentAdmissionMonthKey(s);
       const mutKey = getStudentMutationMonthKey(s);
       const menKey = getStudentMeninggalMonthKey(s);
       const enteredBeforeJuly = admKey < startOfJulyKey;
       const notMutatedBeforeJuly = !mutKey || mutKey >= startOfJulyKey;
       const notMeninggalBeforeJuly = !menKey || menKey >= startOfJulyKey;
-      if (enteredBeforeJuly && notMutatedBeforeJuly && notMeninggalBeforeJuly) {
-        runningActiveMap.set(s.id, s);
-      }
+      return enteredBeforeJuly && notMutatedBeforeJuly && notMeninggalBeforeJuly;
     });
 
     return academicMonths.map((m) => {
-      // Keadaan awal bulan m adalah salinan keadaan berjalan dari bulan sebelumnya
-      const awalList = Array.from(runningActiveMap.values());
+      const awalList = [...runningActiveList];
       const awalL = awalList.filter(s => s.jenisKelamin === 'L').length;
       const awalP = awalList.filter(s => s.jenisKelamin === 'P').length;
       const totalAwal = awalList.length;
 
-      // Siswa Masuk / Mutasi Masuk pada bulan m
+      // Siswa Masuk in this month
       const masukList = eligibleStudentsForTP.filter(s => {
         const admKey = getStudentAdmissionMonthKey(s);
         return admKey === m.key;
@@ -371,7 +335,7 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
       const masukP = masukList.filter(s => s.jenisKelamin === 'P').length;
       const masukCount = masukList.length;
 
-      // Siswa Mutasi Keluar pada bulan m
+      // Siswa Mutasi Keluar in this month (EXCLUDING Meninggal)
       const mutasiList = eligibleStudentsForTP.filter(s => {
         const mutKey = getStudentMutationMonthKey(s);
         return mutKey === m.key;
@@ -380,7 +344,7 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
       const mutasiP = mutasiList.filter(s => s.jenisKelamin === 'P').length;
       const mutasiCount = mutasiList.length;
 
-      // Siswa Meninggal Dunia pada bulan m
+      // Siswa Meninggal Dunia in this month (SEPARATE FROM MUTASI KELUAR)
       const meninggalList = eligibleStudentsForTP.filter(s => {
         const menKey = getStudentMeninggalMonthKey(s);
         return menKey === m.key;
@@ -389,55 +353,42 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
       const meninggalP = meninggalList.filter(s => s.jenisKelamin === 'P').length;
       const meninggalCount = meninggalList.length;
 
-      // Update keadaan berjalan untuk akhir bulan m (berlanjut ke bulan berikutnya)
-      masukList.forEach(s => runningActiveMap.set(s.id, s));
-      mutasiList.forEach(s => runningActiveMap.delete(s.id));
-      meninggalList.forEach(s => runningActiveMap.delete(s.id));
+      // Siswa Akhir = Awal + Masuk - Mutasi Keluar - Meninggal
+      const mutasiIds = new Set(mutasiList.map(s => s.id));
+      const meninggalIds = new Set(meninggalList.map(s => s.id));
+      const akhirMap = new Map<string, typeof eligibleStudentsForTP[0]>();
 
-      const akhirList = Array.from(runningActiveMap.values());
+      awalList.forEach(s => {
+        if (!mutasiIds.has(s.id) && !meninggalIds.has(s.id)) {
+          akhirMap.set(s.id, s);
+        }
+      });
+      masukList.forEach(s => {
+        if (!mutasiIds.has(s.id) && !meninggalIds.has(s.id)) {
+          akhirMap.set(s.id, s);
+        }
+      });
+
+      let akhirList = Array.from(akhirMap.values());
+
+      // JAMINAN SINKRONISASI 100%: Untuk bulan berjalan (current active month),
+      // pastikan keadaan akhir siswa aktif presisi dan identik dengan Data Siswa Aktif (canonicalActiveStudents)
+      if (m.isCurrent || m.key === currentYearMonth) {
+        const mergedActiveMap = new Map<string, typeof eligibleStudentsForTP[0]>();
+        canonicalActiveStudents.forEach(s => mergedActiveMap.set(s.id, s));
+        // Siswa yang mutasi keluar atau meninggal di bulan ini dikeluarkan
+        mutasiIds.forEach((id: string) => mergedActiveMap.delete(id));
+        meninggalIds.forEach((id: string) => mergedActiveMap.delete(id));
+        akhirList = Array.from(mergedActiveMap.values());
+      }
+
       const akhirL = akhirList.filter(s => s.jenisKelamin === 'L').length;
       const akhirP = akhirList.filter(s => s.jenisKelamin === 'P').length;
       const totalAkhir = akhirList.length;
       const netChange = masukCount - mutasiCount - meninggalCount;
 
-      // Hitung rincian pergerakan & jumlah siswa per rombel untuk bulan m
-      const monthlyRombelStats: MonthlyRombelStat[] = availableClasses.map(rombel => {
-        const inAwal = awalList.filter(s => getStudentRombel(s) === rombel);
-        const inMasuk = masukList.filter(s => getStudentRombel(s) === rombel);
-        const inMutasi = mutasiList.filter(s => getStudentRombel(s) === rombel);
-        const inMeninggal = meninggalList.filter(s => getStudentRombel(s) === rombel);
-        const inAkhir = akhirList.filter(s => getStudentRombel(s) === rombel);
-
-        const jmlL = inAkhir.filter(s => s.jenisKelamin === 'L').length;
-        const jmlP = inAkhir.filter(s => s.jenisKelamin === 'P').length;
-        const rombelTotal = inAkhir.length;
-        const tingkat = getTingkatKelasNumber(rombel);
-
-        const savedWali = schoolProfile.waliKelasMap?.[rombel]?.nama;
-        const teacherFromUsers = adminUsers?.find(u => u.tingkatKelas === rombel)?.nama;
-        const wali = savedWali || teacherFromUsers || defaultTeacherNames[rombel] || `Wali Kelas ${rombel}`;
-
-        return {
-          rombel,
-          tingkat,
-          waliKelas: wali,
-          awalTotal: inAwal.length,
-          masukTotal: inMasuk.length,
-          mutasiTotal: inMutasi.length,
-          meninggalTotal: inMeninggal.length,
-          jmlL,
-          jmlP,
-          total: rombelTotal,
-          persentase: totalAkhir > 0 ? Math.round((rombelTotal / totalAkhir) * 100) : 0,
-          students: inAkhir,
-          masukStudents: inMasuk,
-          mutasiStudents: inMutasi,
-          meninggalStudents: inMeninggal,
-        };
-      }).sort((a, b) => {
-        if (a.tingkat !== b.tingkat) return a.tingkat - b.tingkat;
-        return a.rombel.localeCompare(b.rombel, undefined, { numeric: true });
-      });
+      // Update runningActiveList for next month
+      runningActiveList = akhirList;
 
       // Total Siswa Aktif per Tingkat (1 s/d 6) in this month
       const tingkatCounts: Record<number, { total: number; l: number; p: number }> = {
@@ -482,23 +433,57 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
         akhirList,
         netChange,
         tingkatCounts,
-        rombelStats: monthlyRombelStats,
         totalAktif: totalAkhir,
         totalAktifL: akhirL,
         totalAktifP: akhirP,
       };
     });
-  }, [academicMonths, eligibleStudentsForTP, availableClasses, schoolProfile.waliKelasMap, adminUsers, startYear]);
+  }, [academicMonths, eligibleStudentsForTP, canonicalActiveStudents, startYear]);
 
   // Current selected month's specific statistics
   const currentMonthData = useMemo(() => {
     return periodicMonthlyStats.find(p => p.month.key === selectedMonthKey) || periodicMonthlyStats[0];
   }, [periodicMonthlyStats, selectedMonthKey]);
 
-  // Breakdown Jumlah Siswa di Rombel for the selected month (diambil langsung dari pergerakan bulan berjalan)
+  // Breakdown Jumlah Siswa di Rombel for the selected month (diselaraskan dengan Data Siswa Aktif)
   const rombelStats: MonthlyRombelStat[] = useMemo(() => {
-    return currentMonthData.rombelStats || [];
-  }, [currentMonthData]);
+    const monthStudents = currentMonthData.akhirList;
+    const total = monthStudents.length;
+
+    const defaultTeacherNames: Record<string, string> = {
+      'Kelas 1': 'Dewi Anggraini, S.Pd.SD',
+      'Kelas 2': 'Suryani, S.Pd.',
+      'Kelas 3': 'Hendri Gunawan, S.Pd.I.',
+      'Kelas 4': 'Ratna Juwita, S.Pd.',
+      'Kelas 5': 'Bambang Irawan, S.Pd.',
+      'Kelas 6': 'Siti Rahmawati, S.Pd.',
+    };
+
+    return availableClasses.map(rombel => {
+      const inRombel = monthStudents.filter(s => s.kelasSekarang === rombel);
+      const jmlL = inRombel.filter(s => s.jenisKelamin === 'L').length;
+      const jmlP = inRombel.filter(s => s.jenisKelamin === 'P').length;
+      const rombelTotal = inRombel.length;
+      const tingkat = getTingkatKelasNumber(rombel);
+
+      const savedWali = schoolProfile.waliKelasMap?.[rombel]?.nama;
+      const teacherFromUsers = adminUsers?.find(u => u.tingkatKelas === rombel)?.nama;
+      const wali = savedWali || teacherFromUsers || defaultTeacherNames[rombel] || `Wali Kelas ${rombel}`;
+
+      return {
+        rombel,
+        tingkat,
+        waliKelas: wali,
+        jmlL,
+        jmlP,
+        total: rombelTotal,
+        persentase: total > 0 ? Math.round((rombelTotal / total) * 100) : 0,
+      };
+    }).sort((a, b) => {
+      if (a.tingkat !== b.tingkat) return a.tingkat - b.tingkat;
+      return a.rombel.localeCompare(b.rombel, undefined, { numeric: true });
+    });
+  }, [availableClasses, currentMonthData.akhirList, schoolProfile.waliKelasMap, adminUsers]);
 
   // Sembunyikan kelas yang tidak ada siswa (0 siswa) secara default
   const [hideEmptyRombel, setHideEmptyRombel] = useState<boolean>(true);
@@ -523,9 +508,13 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
   }, [selectedRombelForModal, rombelStats]);
 
   const selectedRombelStudents = useMemo(() => {
-    if (!selectedRombelStat) return [];
-    return selectedRombelStat.students || [];
-  }, [selectedRombelStat]);
+    if (!selectedRombelForModal) return [];
+    const inMonth = currentMonthData.akhirList.filter(s => s.kelasSekarang === selectedRombelForModal);
+    if (inMonth.length === 0 && canonicalActiveStudents.length > 0) {
+      return canonicalActiveStudents.filter(s => s.kelasSekarang === selectedRombelForModal);
+    }
+    return inMonth;
+  }, [selectedRombelForModal, currentMonthData.akhirList, canonicalActiveStudents]);
 
   const filteredModalStudents = useMemo(() => {
     if (!modalSearchQuery.trim()) return selectedRombelStudents;
@@ -641,7 +630,7 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
       [`TAHUN PELAJARAN: ${activeTP}`],
       [`STATUS FILTER: ${hideEmptyRombel ? `Hanya Menampilkan Rombel Aktif (${visibleRombelStats.length} Kelas)` : `Semua Rombel Terkonfigurasi (${rombelStats.length} Kelas)`}`],
       [],
-      ['No', 'Nama Rombel / Kelas', 'Tingkat', 'Wali Kelas', 'Siswa Awal', 'Masuk (+)', 'Mutasi (-)', 'Meninggal (-)', 'Laki-Laki (L)', 'Perempuan (P)', 'Total Siswa Akhir', 'Persentase (%)'],
+      ['No', 'Nama Rombel / Kelas', 'Tingkat', 'Wali Kelas', 'Laki-Laki (L)', 'Perempuan (P)', 'Total Siswa', 'Persentase (%)'],
     ];
 
     visibleRombelStats.forEach((r, idx) => {
@@ -650,10 +639,6 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
         r.rombel,
         `Tingkat ${r.tingkat}`,
         r.waliKelas || '-',
-        r.awalTotal,
-        r.masukTotal,
-        r.mutasiTotal,
-        r.meninggalTotal,
         r.jmlL,
         r.jmlP,
         r.total,
@@ -667,10 +652,6 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
       `TOTAL SISWA AKTIF (${selectedMonthInfo.fullName.toUpperCase()})`,
       '-',
       '-',
-      currentMonthData.totalAwal,
-      currentMonthData.masukCount,
-      currentMonthData.mutasiCount,
-      currentMonthData.meninggalCount,
       currentMonthData.totalAkhirL,
       currentMonthData.totalAkhirP,
       currentMonthData.totalAkhir,
@@ -1179,25 +1160,21 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
                         <tr className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
-                          <th className="py-2.5 px-3 font-bold w-10 text-center">No</th>
+                          <th className="py-2.5 px-3 font-bold w-12 text-center">No</th>
                           <th className="py-2.5 px-3 font-bold">Rombel / Kelas</th>
                           <th className="py-2.5 px-3 font-bold">Tingkat</th>
                           <th className="py-2.5 px-3 font-bold">Guru / Wali Kelas</th>
-                          <th className="py-2.5 px-2 font-bold text-center bg-slate-50 dark:bg-slate-800" title="Jumlah siswa pada awal bulan di rombel ini">Awal</th>
-                          <th className="py-2.5 px-2 font-bold text-center bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400" title="Siswa masuk / mutasi masuk pada bulan ini di rombel ini">Masuk (+)</th>
-                          <th className="py-2.5 px-2 font-bold text-center bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400" title="Siswa mutasi keluar pada bulan ini dari rombel ini">Mutasi (-)</th>
-                          <th className="py-2.5 px-2 font-bold text-center bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400" title="Siswa meninggal dunia pada bulan ini dari rombel ini">Meninggal (-)</th>
-                          <th className="py-2.5 px-2 font-bold text-center text-blue-600 dark:text-blue-400">L</th>
-                          <th className="py-2.5 px-2 font-bold text-center text-pink-600 dark:text-pink-400">P</th>
-                          <th className="py-2.5 px-3 font-bold text-center bg-blue-50/50 dark:bg-blue-950/30 text-blue-900 dark:text-blue-300">Total Akhir</th>
-                          <th className="py-2.5 px-2 font-bold text-center">% Rombel</th>
+                          <th className="py-2.5 px-3 font-bold text-center">L</th>
+                          <th className="py-2.5 px-3 font-bold text-center">P</th>
+                          <th className="py-2.5 px-3 font-bold text-center">Total Siswa</th>
+                          <th className="py-2.5 px-3 font-bold text-center">% Rombel</th>
                           <th className="py-2.5 px-3 font-bold text-center w-24">Aksi</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
                         {visibleRombelStats.length === 0 ? (
                           <tr>
-                            <td colSpan={13} className="py-8 text-center text-slate-500 text-xs">
+                            <td colSpan={9} className="py-8 text-center text-slate-500 text-xs">
                               <Layers className="w-8 h-8 mx-auto mb-2 opacity-30 text-slate-400" />
                               <p className="font-bold text-slate-700 dark:text-slate-300">Tidak ada rombel dengan siswa aktif.</p>
                               {emptyRombelCount > 0 && hideEmptyRombel && (
@@ -1229,24 +1206,12 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
                               <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300 font-medium">
                                 {r.waliKelas || <span className="text-slate-400 italic">Belum ditentukan</span>}
                               </td>
-                              <td className="py-2.5 px-2 text-center font-mono font-semibold text-slate-700 dark:text-slate-300 bg-slate-50/50 dark:bg-slate-800/20">
-                                {r.awalTotal}
-                              </td>
-                              <td className="py-2.5 px-2 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50/30 dark:bg-emerald-950/10">
-                                {r.masukTotal > 0 ? `+${r.masukTotal}` : '-'}
-                              </td>
-                              <td className="py-2.5 px-2 text-center font-mono font-bold text-orange-600 dark:text-orange-400 bg-orange-50/30 dark:bg-orange-950/10">
-                                {r.mutasiTotal > 0 ? `-${r.mutasiTotal}` : '-'}
-                              </td>
-                              <td className="py-2.5 px-2 text-center font-mono font-bold text-rose-600 dark:text-rose-400 bg-rose-50/30 dark:bg-rose-950/10">
-                                {r.meninggalTotal > 0 ? `-${r.meninggalTotal}` : '-'}
-                              </td>
-                              <td className="py-2.5 px-2 text-center font-bold text-blue-600 dark:text-blue-400">{r.jmlL}</td>
-                              <td className="py-2.5 px-2 text-center font-bold text-pink-600 dark:text-pink-400">{r.jmlP}</td>
-                              <td className="py-2.5 px-3 text-center font-black text-[#003399] dark:text-amber-300 bg-blue-50/40 dark:bg-blue-950/20">
+                              <td className="py-2.5 px-3 text-center font-bold text-blue-600 dark:text-blue-400">{r.jmlL}</td>
+                              <td className="py-2.5 px-3 text-center font-bold text-pink-600 dark:text-pink-400">{r.jmlP}</td>
+                              <td className="py-2.5 px-3 text-center font-black text-slate-900 dark:text-slate-100">
                                 {r.total}
                               </td>
-                              <td className="py-2.5 px-2 text-center font-mono text-slate-500">{r.persentase}%</td>
+                              <td className="py-2.5 px-3 text-center font-mono text-slate-500">{r.persentase}%</td>
                               <td className="py-2.5 px-3 text-center">
                                 <button
                                   type="button"
@@ -1268,28 +1233,16 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
                       <tfoot>
                         <tr className="bg-slate-50 dark:bg-slate-800/80 font-black border-t-2 border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100">
                           <td colSpan={4} className="py-2.5 px-3 text-right">TOTAL SISWA AKTIF ({selectedMonthInfo.fullName.toUpperCase()}):</td>
-                          <td className="py-2.5 px-2 text-center font-mono font-bold text-slate-700 dark:text-slate-300">
-                            {currentMonthData.totalAwal}
-                          </td>
-                          <td className="py-2.5 px-2 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400">
-                            {currentMonthData.masukCount > 0 ? `+${currentMonthData.masukCount}` : '-'}
-                          </td>
-                          <td className="py-2.5 px-2 text-center font-mono font-bold text-orange-600 dark:text-orange-400">
-                            {currentMonthData.mutasiCount > 0 ? `-${currentMonthData.mutasiCount}` : '-'}
-                          </td>
-                          <td className="py-2.5 px-2 text-center font-mono font-bold text-rose-600 dark:text-rose-400">
-                            {currentMonthData.meninggalCount > 0 ? `-${currentMonthData.meninggalCount}` : '-'}
-                          </td>
-                          <td className="py-2.5 px-2 text-center text-blue-600 dark:text-blue-400 font-black">
+                          <td className="py-2.5 px-3 text-center text-blue-600 dark:text-blue-400 font-black">
                             {currentMonthData.totalAkhirL}
                           </td>
-                          <td className="py-2.5 px-2 text-center text-pink-600 dark:text-pink-400 font-black">
+                          <td className="py-2.5 px-3 text-center text-pink-600 dark:text-pink-400 font-black">
                             {currentMonthData.totalAkhirP}
                           </td>
-                          <td className="py-2.5 px-3 text-center text-[#003399] dark:text-amber-300 font-black text-sm bg-blue-50/50 dark:bg-blue-950/30">
+                          <td className="py-2.5 px-3 text-center text-[#003399] dark:text-amber-300 font-black text-sm">
                             {currentMonthData.totalAkhir}
                           </td>
-                          <td className="py-2.5 px-2 text-center">100%</td>
+                          <td className="py-2.5 px-3 text-center">100%</td>
                           <td></td>
                         </tr>
                       </tfoot>
@@ -1599,12 +1552,12 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
                       <th className="py-2.5 px-3 font-bold text-center bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-300">
                         Siswa Akhir (=)
                       </th>
-                      <th className="py-2.5 px-2 font-bold text-center" title="Kelas 1">Kls 1</th>
-                      <th className="py-2.5 px-2 font-bold text-center" title="Kelas 2">Kls 2</th>
-                      <th className="py-2.5 px-2 font-bold text-center" title="Kelas 3">Kls 3</th>
-                      <th className="py-2.5 px-2 font-bold text-center" title="Kelas 4">Kls 4</th>
-                      <th className="py-2.5 px-2 font-bold text-center" title="Kelas 5">Kls 5</th>
-                      <th className="py-2.5 px-2 font-bold text-center" title="Kelas 6">Kls 6</th>
+                      <th className="py-2.5 px-2 font-bold text-center">T1</th>
+                      <th className="py-2.5 px-2 font-bold text-center">T2</th>
+                      <th className="py-2.5 px-2 font-bold text-center">T3</th>
+                      <th className="py-2.5 px-2 font-bold text-center">T4</th>
+                      <th className="py-2.5 px-2 font-bold text-center">T5</th>
+                      <th className="py-2.5 px-2 font-bold text-center">T6</th>
                       <th className="py-2.5 px-2 font-bold text-center">L / P</th>
                       <th className="py-2.5 px-2 font-bold text-center w-16">Detail</th>
                     </tr>
@@ -1612,13 +1565,6 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
                     {periodicMonthlyStats.map((p, idx) => {
                       const isSelected = p.month.key === selectedMonthKey;
-                      const r1 = p.rombelStats.find(r => r.tingkat === 1)?.total ?? p.tingkatCounts[1].total;
-                      const r2 = p.rombelStats.find(r => r.tingkat === 2)?.total ?? p.tingkatCounts[2].total;
-                      const r3 = p.rombelStats.find(r => r.tingkat === 3)?.total ?? p.tingkatCounts[3].total;
-                      const r4 = p.rombelStats.find(r => r.tingkat === 4)?.total ?? p.tingkatCounts[4].total;
-                      const r5 = p.rombelStats.find(r => r.tingkat === 5)?.total ?? p.tingkatCounts[5].total;
-                      const r6 = p.rombelStats.find(r => r.tingkat === 6)?.total ?? p.tingkatCounts[6].total;
-
                       return (
                         <tr 
                           key={p.month.key}
@@ -1661,13 +1607,13 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
                             {p.totalAkhir}
                           </td>
 
-                          {/* Rombel Kelas 1 to 6 */}
-                          <td className="py-2 px-2 text-center font-mono font-bold text-blue-700 dark:text-blue-300">{r1}</td>
-                          <td className="py-2 px-2 text-center font-mono font-bold text-blue-700 dark:text-blue-300">{r2}</td>
-                          <td className="py-2 px-2 text-center font-mono font-bold text-blue-700 dark:text-blue-300">{r3}</td>
-                          <td className="py-2 px-2 text-center font-mono font-bold text-blue-700 dark:text-blue-300">{r4}</td>
-                          <td className="py-2 px-2 text-center font-mono font-bold text-blue-700 dark:text-blue-300">{r5}</td>
-                          <td className="py-2 px-2 text-center font-mono font-bold text-blue-700 dark:text-blue-300">{r6}</td>
+                          {/* Tingkat 1 to 6 */}
+                          <td className="py-2 px-2 text-center font-mono">{p.tingkatCounts[1].total}</td>
+                          <td className="py-2 px-2 text-center font-mono">{p.tingkatCounts[2].total}</td>
+                          <td className="py-2 px-2 text-center font-mono">{p.tingkatCounts[3].total}</td>
+                          <td className="py-2 px-2 text-center font-mono">{p.tingkatCounts[4].total}</td>
+                          <td className="py-2 px-2 text-center font-mono">{p.tingkatCounts[5].total}</td>
+                          <td className="py-2 px-2 text-center font-mono">{p.tingkatCounts[6].total}</td>
 
                           {/* L / P breakdown */}
                           <td className="py-2 px-2 text-center text-[11px] font-mono text-slate-600 dark:text-slate-400">
@@ -1795,73 +1741,7 @@ export const MonthlyActiveStudentsSummaryCard: React.FC<MonthlyActiveStudentsSum
             </div>
 
             {/* Table Content */}
-            <div className="p-4 overflow-y-auto max-h-[55vh] space-y-4">
-              {/* Catatan Mutasi Masuk / Keluar / Meninggal pada Rombel ini di Bulan ini */}
-              {selectedRombelStat && (
-                <>
-                  {selectedRombelStat.masukStudents && selectedRombelStat.masukStudents.length > 0 && (
-                    <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs">
-                      <span className="font-extrabold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 mb-1.5">
-                        <UserPlus className="w-3.5 h-3.5" />
-                        <span>Siswa Masuk / Mutasi Masuk pada Bulan {selectedMonthInfo.fullName} ({selectedRombelStat.masukStudents.length} Siswa):</span>
-                      </span>
-                      <div className="space-y-1 pl-5">
-                        {selectedRombelStat.masukStudents.map(st => (
-                          <div key={st.id} className="text-slate-700 dark:text-slate-300 flex flex-wrap items-center gap-x-2">
-                            <span className="font-bold text-slate-900 dark:text-slate-100">• {st.namaLengkap}</span>
-                            <span className="text-[11px] font-mono font-semibold px-1.5 py-0.2 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded">
-                              {st.jenisKelamin === 'L' ? 'Laki-Laki' : 'Perempuan'}
-                            </span>
-                            <span className="text-slate-500">Tgl Masuk: <strong>{st.tanggalDiterima || (st as any).tanggalMasuk || '-'}</strong></span>
-                            {st.sekolahAsalTK && <span className="text-slate-500">Asal: {st.sekolahAsalTK}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedRombelStat.mutasiStudents && selectedRombelStat.mutasiStudents.length > 0 && (
-                    <div className="p-3 rounded-xl bg-orange-50 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 text-xs">
-                      <span className="font-extrabold text-orange-800 dark:text-orange-300 flex items-center gap-1.5 mb-1.5">
-                        <UserMinus className="w-3.5 h-3.5" />
-                        <span>Siswa Mutasi Keluar pada Bulan {selectedMonthInfo.fullName} ({selectedRombelStat.mutasiStudents.length} Siswa):</span>
-                      </span>
-                      <div className="space-y-1 pl-5">
-                        {selectedRombelStat.mutasiStudents.map(st => (
-                          <div key={st.id} className="text-slate-700 dark:text-slate-300 flex flex-wrap items-center gap-x-2">
-                            <span className="font-bold text-slate-900 dark:text-slate-100">• {st.namaLengkap}</span>
-                            <span className="text-[11px] font-mono font-semibold px-1.5 py-0.2 bg-orange-100 dark:bg-orange-900/60 text-orange-800 dark:text-orange-200 rounded">
-                              {st.jenisKelamin === 'L' ? 'Laki-Laki' : 'Perempuan'}
-                            </span>
-                            <span className="text-slate-500">Tgl Mutasi: <strong>{st.mutasi?.tglMeninggalkan || st.mutasi?.dikeluarkanTanggal || '-'}</strong></span>
-                            {st.mutasi?.sekolahTujuan && <span className="text-slate-500">Tujuan: <strong>{st.mutasi.sekolahTujuan}</strong></span>}
-                            {st.mutasi?.alasanPindah && <span className="text-slate-400 italic">({st.mutasi.alasanPindah})</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {selectedRombelStat.meninggalStudents && selectedRombelStat.meninggalStudents.length > 0 && (
-                    <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs">
-                      <span className="font-extrabold text-rose-800 dark:text-rose-300 flex items-center gap-1.5 mb-1.5">
-                        <UserX className="w-3.5 h-3.5" />
-                        <span>Siswa Meninggal Dunia pada Bulan {selectedMonthInfo.fullName} ({selectedRombelStat.meninggalStudents.length} Siswa):</span>
-                      </span>
-                      <div className="space-y-1 pl-5">
-                        {selectedRombelStat.meninggalStudents.map(st => (
-                          <div key={st.id} className="text-slate-700 dark:text-slate-300 flex flex-wrap items-center gap-x-2">
-                            <span className="font-bold text-slate-900 dark:text-slate-100">• {st.namaLengkap}</span>
-                            <span className="text-slate-500">Tgl Meninggal: <strong>{(st as any).tanggalMeninggal || st.mutasi?.tglMeninggalkan || '-'}</strong></span>
-                            {st.mutasi?.alasanPindah && <span className="text-slate-400 italic">({st.mutasi.alasanPindah})</span>}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
+            <div className="p-4 overflow-y-auto max-h-[55vh]">
               {filteredModalStudents.length === 0 ? (
                 <div className="py-12 text-center text-slate-500 dark:text-slate-400 space-y-2">
                   <Users className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600" />
